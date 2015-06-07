@@ -68,7 +68,13 @@ func TestPool(t *testing.T) {
 	var dialCount int32
 	p := Pool{New: func() (net.Conn, error) {
 		atomic.AddInt32(&dialCount, 1)
-		return net.Dial("tcp", addr)
+		c, err := net.Dial("tcp", addr)
+		if err == nil {
+			runtime.SetFinalizer(c, func(c net.Conn) {
+				atomic.AddInt32(&dialCount, -1)
+			})
+		}
+		return c, err
 	}}
 
 	// Get and Put one
@@ -79,10 +85,9 @@ func TestPool(t *testing.T) {
 		p.Put(c)
 	}
 	st.Expect(t, dialCount, int32(1))
-	runtime.GC()
 
 	// Get several
-	dialCount = 0
+	runtime.GC()
 	var cs []net.Conn
 	for i := 0; i < 5; i++ {
 		c, err := p.Get()
@@ -97,11 +102,10 @@ func TestPool(t *testing.T) {
 		st.Expect(t, err, nil)
 	}
 	st.Expect(t, dialCount, int32(5))
-	runtime.GC()
 
 	// Test concurrency
+	runtime.GC()
 	var wg sync.WaitGroup
-	dialCount = 0
 	for i := 0; i < 10; i++ {
 		wg.Add(1)
 		go func() {
