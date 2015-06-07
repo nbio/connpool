@@ -1,13 +1,17 @@
+// +build !race
+// This package cannot be tested with the Go race detector (-race)
+// because sync.Pool is disabled (no-op) when race detection is enabled.
+
 package connpool
 
 import (
 	"bufio"
-	"fmt"
 	"io"
 	"log"
 	"net"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/nbio/st"
@@ -35,7 +39,6 @@ func server() {
 			for {
 				line, err := b.ReadBytes('\n')
 				if err == io.EOF {
-					fmt.Println("+ client disconnected")
 					return
 				} else if err != nil {
 					log.Fatal(err)
@@ -62,9 +65,9 @@ func TestEcho(t *testing.T) {
 }
 
 func TestPool(t *testing.T) {
-	var dialCount int
+	var dialCount int32
 	p := Pool{New: func() (net.Conn, error) {
-		dialCount++
+		atomic.AddInt32(&dialCount, 1)
 		return net.Dial("tcp", addr)
 	}}
 
@@ -75,7 +78,7 @@ func TestPool(t *testing.T) {
 		echo(t, c, []byte("alpha\n"))
 		p.Put(c)
 	}
-	st.Expect(t, dialCount, 1)
+	st.Expect(t, dialCount, int32(1))
 	runtime.GC()
 
 	// Get several
@@ -93,7 +96,7 @@ func TestPool(t *testing.T) {
 		_, err := p.Get()
 		st.Expect(t, err, nil)
 	}
-	st.Expect(t, dialCount, 5)
+	st.Expect(t, dialCount, int32(5))
 	runtime.GC()
 
 	// Test concurrency
@@ -108,5 +111,5 @@ func TestPool(t *testing.T) {
 		}()
 	}
 	wg.Wait()
-	st.Expect(t, dialCount, 10)
+	st.Expect(t, dialCount, int32(10))
 }
